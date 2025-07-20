@@ -1,74 +1,89 @@
-import requests, html
+import requests
 from bs4 import BeautifulSoup
 
-def get_product_details_html(PNumber: str) -> str:
-    url = f"https://shop.api.de/product/details/{PNumber}"
-    resp = requests.get(url)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, 'html.parser')
+def scrape_specifications(pnumber):
+    url = f"https://shop.api.de/product/details/{pnumber}?seek=1"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    }
 
-    product_section = soup.find(id="product_details")
-    if not product_section:
-        return ""
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception(f"Chyba stahování stránky: {response.status_code}")
 
-    # 1. Popis
-    description_text = ""
-    desc_tab = product_section.find('div', id=lambda s: s and s.endswith('_0'))
-    if desc_tab:
-        p = desc_tab.find('p')
-        if p:
-            description_text = html.escape(p.get_text(separator="\n").strip())
+    soup = BeautifulSoup(response.text, 'html.parser')
+    sections = soup.find_all("span", class_="displayTabOnPrint")
 
-    # 2. Technická data
-    specs_output = ""
-    tech_tab = product_section.find('div', id=lambda s: s and s.endswith('_1'))
-    if tech_tab:
-        rows = tech_tab.find_all('div', class_=lambda c: c and 'ms-3' in c and 'align-items-end' in c)
-        for row in rows:
-            key_div = row.find('div', class_=lambda c: c and 'col-lg-2' in c)
-            val_div = row.find('div', class_=lambda c: c and 'col-lg-10' in c)
-            if not key_div or not val_div:
+    if not sections:
+        raise Exception("Nebyla nalezena žádná sekce s hlavními specifikacemi.")
+
+    result_html = ""
+
+    for section in sections:
+        # Najdi všechny specifikační bloky v pořadí, jak se vyskytují na stránce
+        spec_divs = section.find_all(
+            lambda tag: tag.name == "div" and tag.get("class") in [["mb-5", "px-2", "pb-5"], ["mb-4", "px-2"]]
+        )
+
+        for div in spec_divs:
+            title_tag = div.find("h6", class_="fw-bold")
+            if not title_tag:
                 continue
 
-            label = html.escape(key_div.get_text(strip=True))
+            title = title_tag.get_text(strip=True)
+            items_html = ""
 
-            # Získání jednotlivých řádků nebo li
-            list_items = []
-            li_tags = val_div.find_all("li")
-            if li_tags:
-                # Pokud jsou <li>, použij je přímo
-                for li in li_tags:
-                    text = li.get_text(strip=True)
-                    if text:
-                        list_items.append(html.escape(text))
-            else:
-                # Pokud ne, rozděl <br> nebo text podle řádků
-                text = val_div.get_text(separator="\n").strip()
-                for line in text.splitlines():
-                    line = line.strip()
-                    if line:
-                        list_items.append(html.escape(line))
+            for row in div.find_all("div", class_="row mb-1 ms-3 align-items-end"):
+                cols = row.find_all("div", class_="col")
+                if len(cols) < 2:
+                    continue
+                key = cols[0].get_text(strip=True)
+                value = cols[1].get_text(strip=True)
+                items_html += f"<li>{key}: {value}</li>\n"
 
-            # Vygeneruj HTML
-            if list_items:
-                specs_output += f"<b>{label}</b>\n<ul>\n"
-                for item in list_items:
-                    specs_output += f"  <li>{item}</li>\n"
-                specs_output += "</ul>\n"
+            if items_html:
+                result_html += f"<b>{title}</b>\n<ul>\n{items_html}</ul>\n"
 
-    # Výsledný HTML výstup
-    result = ""
-    if description_text:
-        result += f"<span>{description_text}</span>\n"
-    if specs_output:
-        result += "<h6>Technické podrobnosti</h6>\n" + specs_output
+    return result_html
 
-    return result
+def scrape_description(pnumber):
+    url = f"https://shop.api.de/product/details/{pnumber}?seek=1"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    }
 
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception(f"Chyba stahování stránky: {response.status_code}")
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    span_section = soup.find("span", class_="displayTabOnPrint")
+
+    if not span_section:
+        raise Exception("Popis produktu nebyl nalezen.")
+
+    # Najdi hlavní odstavec
+    description_paragraph = span_section.find("p", class_="mb-4 mt-3")
+    description_text = description_paragraph.get_text(strip=True) if description_paragraph else ""
+
+    # Najdi všechny doplňkové body
+    bullet_spans = span_section.find_all("span", class_="mb-3 ms-2")
+    bullets = [f"<br>{span.get_text(strip=True)}" for span in bullet_spans]
+
+    # Poskládej finální HTML
+    full_html = f"<span>{description_text}\n\n{''.join(bullets)}</span><br>"
+    return full_html
 
 
 if __name__ == "__main__":
-    # Example usage
-    product_number = "462846"  # Replace with a valid product number
-    html_content = get_product_details_html(product_number)
-    print(html_content)  # Output the HTML content
+    pnumber = "171914"
+    try:
+        description_html = scrape_description(pnumber)
+        #print("Popis produktu:")
+        print(description_html)
+        #print("Specifikace produktu:")
+        specifications_html = scrape_specifications(pnumber)
+        print(specifications_html)
+
+    except Exception as e:
+        print(f"Chyba při získávání specifikací: {e}")

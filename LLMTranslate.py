@@ -9,7 +9,7 @@ load_dotenv()
 
 def get_ai_response(
         user_message: str,
-        model: str = "deepseek-ai/DeepSeek-R1-0528",
+        model: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
         delete_think: bool = True
 ) -> str:
     """

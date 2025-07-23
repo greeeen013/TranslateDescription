@@ -214,6 +214,11 @@ class TranslationApp:
             # Scrapování popisu a specifikací
             description = scrape_description(siv_code)
             specifications = scrape_specifications(siv_code)
+
+            # Kontrola prázdného popisu
+            if not description and not specifications:
+                raise Exception(f"Produkt {siv_code} nemá popis ani specifikace")
+
             original_html = f"<h3>{siv_name}</h3>{description}{specifications}"
 
             print(f"[DEBUG] Scrapování originálu dokončeno za {time.time() - start_time:.2f}s")
@@ -224,15 +229,31 @@ class TranslationApp:
             # Pak spustíme překlad
             self.start_translation(original_html, siv_code)
 
-            if not description and not specifications:
-                raise Exception(f"Produkt {siv_code} nemá popis ani specifikace")
-
         except Exception as e:
-            print(f"[ERROR] Chyba u produktu {siv_code}: {str(e)}")
-            self.result_queue.put(("error", f"Chyba u produktu {siv_code}: {str(e)}"))
+            error_msg = f"{str(e)} - přeskočeno"
+            print(f"[ERROR] {error_msg}")
+            self.result_queue.put(("info", error_msg))
+
+            # Pokud je zapnuto auto potvrzování, automaticky přeskočíme
+            if self.auto_confirm:
+                self.result_queue.put(("auto_skip",))
+            else:
+                # Jinak jen deaktivujeme tlačítka
+                self.result_queue.put(("disable_buttons",))
 
     def start_translation(self, original_html, siv_code):
         """Spustí proces překladu"""
+        # Kontrola prázdného popisu
+        if not original_html.strip() or original_html.strip() == f"<h3>{self.current_products[self.current_index][1]}</h3>":
+            error_msg = f"Produkt {siv_code} nemá popis - přeskočeno"
+            print(f"[WARNING] {error_msg}")
+            self.result_queue.put(("info", error_msg))
+
+            # Pokud je zapnuto auto potvrzování, přeskočíme
+            if self.auto_confirm:
+                self.result_queue.put(("auto_skip",))
+            return
+
         if self.translation_in_progress:
             return
 
@@ -287,7 +308,7 @@ class TranslationApp:
                 if result[0] == "products_loaded":
                     products = result[1]
                     if not products:
-                        messagebox.showinfo("Info", "Žádné další produkty k překladu")
+                        self.status_var.set("Žádné další produkty k překladu")
                         self.reset_ui()
                     else:
                         print(f"[DEBUG] Zobrazuji načtené produkty")
@@ -297,7 +318,6 @@ class TranslationApp:
 
                 elif result[0] == "original_loaded":
                     original, siv_code = result[1], result[2]
-
                     print(f"[DEBUG] Zobrazuji originál produktu {siv_code}")
 
                     # Zobrazení původního textu
@@ -311,7 +331,6 @@ class TranslationApp:
 
                 elif result[0] == "translation_loaded":
                     translated, siv_code = result[1], result[2]
-
                     print(f"[DEBUG] Zobrazuji překlad produktu {siv_code}")
 
                     # Zobrazení překladu
@@ -323,7 +342,6 @@ class TranslationApp:
                         print("[DEBUG] Automaticky potvrzuji překlad")
                         self.confirm_translation()
 
-
                 elif result[0] == "translation_finished":
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
@@ -332,17 +350,26 @@ class TranslationApp:
                     self.confirm_btn["state"] = "normal"
 
                 elif result[0] == "error":
+                    # Zobrazíme chybu pouze v status baru
                     print(f"[ERROR] {result[1]}")
-                    messagebox.showerror("Chyba", result[1])
-                    self.status_var.set("Chyba")
-                    self.set_loading(False)
-                    self.translation_progress.stop()
-                    self.translation_progress.pack_forget()
+                    self.status_var.set(f"Chyba: {result[1]}")
+                    self.error_count += 1
 
-                    # Pokud je chyba, vypneme auto potvrzení
+                    # Pokud je zapnuto auto potvrzování, přeskočíme produkt
                     if self.auto_confirm:
-                        self.auto_confirm_var.set(False)
-                        self.toggle_auto_confirm()
+                        self.result_queue.put(("auto_skip",))
+                    else:
+                        # Povolíme pouze tlačítko přeskočit
+                        self.result_queue.put(("disable_buttons",))
+
+                elif result[0] == "auto_skip":
+                    # Automatické přeskočení produktu
+                    self.skip_product()
+
+                elif result[0] == "disable_buttons":
+                    # Nastavení stavu tlačítek
+                    self.skip_btn["state"] = "normal"
+                    self.confirm_btn["state"] = "disabled"
 
                 elif result[0] == "info":
                     print(f"[INFO] {result[1]}")
@@ -360,21 +387,29 @@ class TranslationApp:
             return
 
         print(f"[DEBUG] Přeskakuji produkt {self.current_siv_code}")
+
+        # Resetujeme stav
+        self.status_var.set(f"Přeskočeno: {self.current_siv_code}")
         self.clear_texts()
         self.translation_progress.stop()
         self.translation_progress.pack_forget()
         self.translation_in_progress = False
+
+        # Přesun na další produkt
         self.current_index += 1
         self.load_product_details()
 
     def confirm_translation(self):
         """Potvrdí překlad a uloží do DB"""
+        # Přidáme kontrolu prázdného překladu
         translated = self.translated_text.get(1.0, tk.END).strip()
-        print(f"[DEBUG] Potvrzuji překlad pro produkt {self.current_siv_code}")
-
         if not translated:
-            messagebox.showwarning("Varování", "Překlad je prázdný")
+            self.status_var.set("Varování: Překlad je prázdný - přeskočeno")
+            print("[WARNING] Překlad je prázdný - přeskočeno")
+            self.skip_product()
             return
+
+        print(f"[DEBUG] Potvrzuji překlad pro produkt {self.current_siv_code}")
 
         # Uložení v novém vlákně
         threading.Thread(

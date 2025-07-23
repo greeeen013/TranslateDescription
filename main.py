@@ -19,6 +19,7 @@ class TranslationApp:
         self.supplier_code = None
         self.loading = False
         self.translation_in_progress = False
+        self.auto_confirm = False  # Inicializace proměnné pro automatické potvrzování
 
         # Fronta pro komunikaci mezi vlákny
         self.result_queue = queue.Queue()
@@ -27,9 +28,13 @@ class TranslationApp:
         self.check_queue()
 
     def create_widgets(self):
+        # Frame pro dodavatele a automatické potvrzení
+        control_frame = ttk.Frame(self.root)
+        control_frame.pack(fill="x", padx=10, pady=5)
+
         # Frame pro dodavatele
-        supplier_frame = ttk.LabelFrame(self.root, text="Dodavatel")
-        supplier_frame.pack(fill="x", padx=10, pady=5)
+        supplier_frame = ttk.LabelFrame(control_frame, text="Dodavatel")
+        supplier_frame.pack(side="left", fill="x", expand=True, padx=5, pady=5)
 
         ttk.Label(supplier_frame, text="Vyberte dodavatele:").pack(side="left", padx=5, pady=5)
 
@@ -42,9 +47,19 @@ class TranslationApp:
         self.supplier_cb.pack(side="left", padx=5, pady=5, fill="x", expand=True)
         self.supplier_cb.bind("<<ComboboxSelected>>", self.supplier_selected)
 
+        # Checkbox pro automatické potvrzení
+        self.auto_confirm_var = tk.BooleanVar(value=self.auto_confirm)
+        auto_confirm_check = ttk.Checkbutton(
+            control_frame,
+            text="Automatické potvrzování",
+            variable=self.auto_confirm_var,
+            command=self.toggle_auto_confirm
+        )
+        auto_confirm_check.pack(side="right", padx=10, pady=5)
+
         # Naplnění dodavateli
         suppliers = get_suppliers()
-        self.supplier_cb["values"] = [f"{name}" for code, name in suppliers]
+        self.supplier_cb["values"] = [f"{name} ({code})" for code, name in suppliers]
         self.supplier_cb.set('')
 
         # Frame pro obsah
@@ -86,7 +101,7 @@ class TranslationApp:
             length=280
         )
         self.translation_progress.pack(fill="x", padx=10, pady=5)
-        self.translation_progress.pack_forget()  # Skryjeme na začátku
+        self.translation_progress.pack_forget()
 
         # Status bar
         self.status_var = tk.StringVar(value="Připraveno")
@@ -112,6 +127,15 @@ class TranslationApp:
             state="disabled"
         )
         self.confirm_btn.pack(side="right", padx=5)
+
+    def toggle_auto_confirm(self):
+        """Přepíná stav automatického potvrzování"""
+        self.auto_confirm = self.auto_confirm_var.get()
+        print(f"[DEBUG] Automatické potvrzování: {'ZAPNUTO' if self.auto_confirm else 'VYPNUTO'}")
+
+        # Pokud je automatické potvrzování zapnuto a máme aktuální překlad, potvrdíme ho
+        if self.auto_confirm and self.translated_text.get("1.0", tk.END).strip():
+            self.confirm_translation()
 
     def supplier_selected(self, event):
         """Zpracování výběru dodavatele"""
@@ -283,6 +307,11 @@ class TranslationApp:
                     self.translated_text.delete(1.0, tk.END)
                     self.translated_text.insert(tk.END, translated)
 
+                    # Automatické potvrzení pokud je aktivní
+                    if self.auto_confirm:
+                        print("[DEBUG] Automaticky potvrzuji překlad")
+                        self.confirm_translation()
+
                 elif result[0] == "translation_finished":
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
@@ -294,6 +323,11 @@ class TranslationApp:
                     self.set_loading(False)
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
+
+                    # Pokud je chyba, vypneme auto potvrzení
+                    if self.auto_confirm:
+                        self.auto_confirm_var.set(False)
+                        self.toggle_auto_confirm()
 
                 elif result[0] == "info":
                     print(f"[INFO] {result[1]}")
@@ -368,14 +402,12 @@ class TranslationApp:
         self.translation_in_progress = False
 
     def set_loading(self, loading, message=None):
-        """Nastaví indikátor načítání"""
+        """Nastaví stav načítání"""
         self.loading = loading
         if loading:
-            self.loading_label.config(text=f"⏳ {message}", foreground="blue")
-            self.root.config(cursor="watch")
+            self.loading_label.config(text=message)
         else:
             self.loading_label.config(text="")
-            self.root.config(cursor="")
 
 
 if __name__ == "__main__":

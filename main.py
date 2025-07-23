@@ -281,6 +281,7 @@ class TranslationApp:
             error_msg = f"{str(e)} - přeskočeno"
             #print(f"[ERROR] {error_msg}")
             self.result_queue.put(("info", error_msg))
+            self.set_loading(False, "Produkt nenalezen nebo chyba při scrapování")
 
             # Pokud je zapnuto auto potvrzování, automaticky přeskočíme
             if self.auto_confirm:
@@ -329,6 +330,7 @@ class TranslationApp:
             prompt = (
                     "Převeď následující text z polštiny do češtiny. Text obsahuje HTML tagy ty ponech beze změny. "
                     "Překládej pouze textový obsah, HTML tagy a atributy zachovej beze změny. Nic do textu nepřidávej ani neodebírej pouze překládej."
+                    "To co bude v <h3> tagu ponech beze změny, protože to je název produktu."
                     "Zde je text:\n\n" + original_html
             )
 

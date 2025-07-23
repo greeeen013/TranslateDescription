@@ -17,21 +17,25 @@ class TranslationApp:
         self.root.title("Překlad produktových popisků")
         self.root.geometry("1200x800")
 
-        self.current_siv_code = None  # Přidat inicializaci
-
+        self.current_siv_code = None
         self.current_products = []
         self.current_index = 0
         self.supplier_code = None
         self.loading = False
         self.translation_in_progress = False
-        self.auto_confirm = False  # Inicializace proměnné pro automatické potvrzování
-        self.error_count = 0  # Přidáme počítadlo chyb
+        self.auto_confirm = False
+        self.error_count = 0
+        self.translation_buffer = []  # Buffer pro překlady
+        self.buffer_size = 20  # Velikost bufferu před uložením
 
         # Fronta pro komunikaci mezi vlákny
         self.result_queue = queue.Queue()
 
         self.create_widgets()
         self.check_queue()
+
+        # Přidání obsluhy zavírání okna
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def add_to_ignore_list(self, supplier_code, siv_code):
         """Přidá SivCode do ignore listu pro daného dodavatele"""
@@ -154,6 +158,15 @@ class TranslationApp:
             state="disabled"
         )
         self.skip_btn.pack(side="left", padx=5)
+
+        # Přidáno tlačítko Uložit
+        self.save_btn = ttk.Button(
+            button_frame,
+            text="Uložit",
+            command=self.flush_buffer,
+            state="disabled"
+        )
+        self.save_btn.pack(side="right", padx=5)
 
         self.confirm_btn = ttk.Button(
             button_frame,
@@ -439,7 +452,7 @@ class TranslationApp:
         self.load_product_details()
 
     def confirm_translation(self):
-        """Potvrdí překlad a uloží do DB"""
+        """Potvrdí překlad a přidá do bufferu"""
         # Přidáme kontrolu prázdného překladu
         translated = self.translated_text.get(1.0, tk.END).strip()
         if not translated:
@@ -450,12 +463,13 @@ class TranslationApp:
 
         print(f"[DEBUG] Potvrzuji překlad pro produkt {self.current_siv_code}")
 
-        # Uložení v novém vlákně
-        threading.Thread(
-            target=self.save_translation_thread,
-            args=(self.current_siv_code, translated),
-            daemon=True
-        ).start()
+        # Přidání do bufferu
+        self.translation_buffer.append((self.current_siv_code, translated))
+        self.save_btn["state"] = "normal"  # Aktivujeme tlačítko Uložit
+
+        # Uložení pokud je buffer plný
+        if len(self.translation_buffer) >= self.buffer_size:
+            self.flush_buffer()
 
         # Přesun na další produkt
         self.clear_texts()
@@ -464,6 +478,45 @@ class TranslationApp:
         self.translation_in_progress = False
         self.current_index += 1
         self.load_product_details()
+
+    def flush_buffer(self):
+        """Uloží obsah bufferu do databáze"""
+        if not self.translation_buffer:
+            return
+
+        print(f"[DEBUG] Ukládám {len(self.translation_buffer)} překladů do DB")
+
+        # Uložení v novém vlákně
+        threading.Thread(
+            target=self.save_buffer_thread,
+            args=(self.translation_buffer.copy(),),
+            daemon=True
+        ).start()
+
+        # Vyprázdnění bufferu
+        self.translation_buffer = []
+        self.save_btn["state"] = "disabled"  # Deaktivujeme tlačítko
+
+    def save_buffer_thread(self, buffer):
+        """Uložení bufferu do DB"""
+        try:
+            for siv_code, translation in buffer:
+                update_product_note(siv_code, translation)
+            self.result_queue.put(("info", f"Uloženo {len(buffer)} překladů"))
+        except Exception as e:
+            print(f"[ERROR] Chyba při ukládání bufferu: {str(e)}")
+            self.result_queue.put(("error", str(e)))
+
+    def on_close(self):
+        """Obsluha zavírání okna - uloží buffer před ukončením"""
+        if self.translation_buffer:
+            print("[INFO] Ukládám zbývající překlady před zavřením")
+            # Vynucené uložení synchronně
+            for siv_code, translation in self.translation_buffer:
+                update_product_note(siv_code, translation)
+            # Krátké zpoždění pro dokončení uložení
+            time.sleep(1)
+        self.root.destroy()
 
     def save_translation_thread(self, siv_code, translation):
         """Uložení překladu do DB"""

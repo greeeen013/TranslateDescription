@@ -33,18 +33,17 @@ def get_products(supplier_code, limit=10):
 
         # Získat ignorované SivCodes pro tohoto dodavatele
         ignored_codes = get_ignored_siv_codes(supplier_code)
-        ignored_condition = ""
-        if ignored_codes:
-            # Vytvořit SQL podmínku pro vynechání ignorovaných kódů
-            ignored_ids = ", ".join(f"'{code}'" for code in ignored_codes)
-            ignored_condition = f"AND SivCode NOT IN ({ignored_ids})"
+
+        cursor.execute("CREATE TABLE #IgnoredCodes (SivCode NVARCHAR(MAX))")
+        for code in ignored_codes:
+            cursor.execute("INSERT INTO #IgnoredCodes (SivCode) VALUES (?)", (code,))
 
         query = f"""
             SELECT TOP {limit} SivCode, SivName 
             FROM {table}
             WHERE SivComId = ? 
             AND (SivPLNote IS NULL OR SivPLNote = '')
-            {ignored_condition}
+            AND SivCode NOT IN (SELECT SivCode FROM #IgnoredCodes)
         """
         print(f"[DEBUG] SQL Query: {query}")
         cursor.execute(query, (supplier_code,))
@@ -73,6 +72,29 @@ def update_product_note(siv_code, note_text):
         print(f"[SUCCESS] Uložen překlad pro produkt {siv_code}")
     except Exception as e:
         print(f"[ERROR] Chyba při ukládání překladu: {str(e)}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
+def update_product_notes_batch(notes):
+    """
+    Hromadné ukládání překladů
+    Args:
+        notes: seznam n-tic (siv_code, note_text)
+    """
+    conn = connect_to_db()
+    cursor = conn.cursor()
+    try:
+        table = os.getenv('DB_TABLE', '')
+        query = f"UPDATE {table} SET SivPLNote = ? WHERE SivCode = ?"
+
+        # Spustíme hromadný update
+        cursor.executemany(query, notes)
+        conn.commit()
+        print(f"[SUCCESS] Uloženo {len(notes)} překladů najednou")
+    except Exception as e:
+        print(f"[ERROR] Chyba při hromadném ukládání: {str(e)}")
         conn.rollback()
     finally:
         cursor.close()

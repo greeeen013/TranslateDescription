@@ -14,12 +14,15 @@ class TranslationApp:
         self.root.title("Překlad produktových popisků")
         self.root.geometry("1200x800")
 
+        self.current_siv_code = None  # Přidat inicializaci
+
         self.current_products = []
         self.current_index = 0
         self.supplier_code = None
         self.loading = False
         self.translation_in_progress = False
         self.auto_confirm = False  # Inicializace proměnné pro automatické potvrzování
+        self.error_count = 0  # Přidáme počítadlo chyb
 
         # Fronta pro komunikaci mezi vlákny
         self.result_queue = queue.Queue()
@@ -187,8 +190,8 @@ class TranslationApp:
             ).start()
             return
 
-        # Získání aktuálního produktu
         siv_code, siv_name = self.current_products[self.current_index]
+        self.current_siv_code = siv_code
         print(f"[DEBUG] Načítám produkt {self.current_index + 1}/{len(self.current_products)}: {siv_code} - {siv_name}")
         self.status_var.set(f"Produkt {self.current_index + 1}/{len(self.current_products)}: {siv_name}")
 
@@ -221,6 +224,9 @@ class TranslationApp:
             # Pak spustíme překlad
             self.start_translation(original_html, siv_code)
 
+            if not description and not specifications:
+                raise Exception(f"Produkt {siv_code} nemá popis ani specifikace")
+
         except Exception as e:
             print(f"[ERROR] Chyba u produktu {siv_code}: {str(e)}")
             self.result_queue.put(("error", f"Chyba u produktu {siv_code}: {str(e)}"))
@@ -231,6 +237,9 @@ class TranslationApp:
             return
 
         self.translation_in_progress = True
+        # Deaktivace tlačítek během překladu
+        self.skip_btn["state"] = "disabled"
+        self.confirm_btn["state"] = "disabled"
         self.translation_progress.pack()
         self.translation_progress.start()
 
@@ -260,11 +269,13 @@ class TranslationApp:
 
             self.result_queue.put(("translation_loaded", translated, siv_code))
 
+
         except Exception as e:
             print(f"[ERROR] Chyba při překladu produktu {siv_code}: {str(e)}")
             self.result_queue.put(("error", f"Chyba při překladu produktu {siv_code}: {str(e)}"))
         finally:
             self.translation_in_progress = False
+            # Ujistěte se, že se tlačítka aktivují i při chybě
             self.result_queue.put(("translation_finished",))
 
     def check_queue(self):
@@ -312,9 +323,13 @@ class TranslationApp:
                         print("[DEBUG] Automaticky potvrzuji překlad")
                         self.confirm_translation()
 
+
                 elif result[0] == "translation_finished":
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
+                    # Aktivace tlačítek po dokončení překladu
+                    self.skip_btn["state"] = "normal"
+                    self.confirm_btn["state"] = "normal"
 
                 elif result[0] == "error":
                     print(f"[ERROR] {result[1]}")
@@ -340,6 +355,10 @@ class TranslationApp:
 
     def skip_product(self):
         """Přeskočí aktuální produkt"""
+        if not hasattr(self, 'current_siv_code') or self.current_siv_code is None:
+            print("[DEBUG] Žádný produkt k přeskočení")
+            return
+
         print(f"[DEBUG] Přeskakuji produkt {self.current_siv_code}")
         self.clear_texts()
         self.translation_progress.stop()

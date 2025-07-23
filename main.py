@@ -265,7 +265,8 @@ class TranslationApp:
             if not description and not specifications:
                 raise Exception(f"Produkt {siv_code} nemá popis ani specifikace")
 
-            original_html = f"<h3>{siv_name}</h3>{description}{specifications}"
+            #original_html = f"<h3>{siv_name}</h3>{description}{specifications}"
+            original_html = f"{description}{specifications}"
 
             print(f"[DEBUG] Scrapování originálu dokončeno za {time.time() - start_time:.2f}s")
 

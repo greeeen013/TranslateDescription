@@ -6,7 +6,10 @@ from LLMTranslate import get_ai_response
 import threading
 import queue
 import time
+import json
+import os
 
+IGNORE_FILE = "ignoreSivCode.json"
 
 class TranslationApp:
     def __init__(self, root):
@@ -29,6 +32,35 @@ class TranslationApp:
 
         self.create_widgets()
         self.check_queue()
+
+    def add_to_ignore_list(self, supplier_code, siv_code):
+        """Přidá SivCode do ignore listu pro daného dodavatele"""
+        # Převést na stringy pro konzistenci
+        supplier_code = str(supplier_code)
+        siv_code = str(siv_code)
+
+        data = {}
+        if os.path.exists(IGNORE_FILE):
+            try:
+                with open(IGNORE_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception as e:
+                print(f"[WARNING] Chyba při čtení {IGNORE_FILE}: {e}")
+
+        # Inicializovat seznam pro dodavatele pokud neexistuje
+        if supplier_code not in data:
+            data[supplier_code] = []
+
+        # Přidat SivCode pokud ještě není v seznamu
+        if siv_code not in data[supplier_code]:
+            data[supplier_code].append(siv_code)
+            print(f"[INFO] Přidávám do ignore listu: {supplier_code} -> {siv_code}")
+
+        try:
+            with open(IGNORE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+        except Exception as e:
+            print(f"[ERROR] Chyba při zápisu do {IGNORE_FILE}: {e}")
 
     def create_widgets(self):
         # Frame pro dodavatele a automatické potvrzení
@@ -386,7 +418,14 @@ class TranslationApp:
             print("[DEBUG] Žádný produkt k přeskočení")
             return
 
+        if not self.current_siv_code:
+            return
+
         print(f"[DEBUG] Přeskakuji produkt {self.current_siv_code}")
+
+        # Přidat do ignore listu
+        if self.supplier_code and self.current_siv_code:
+            self.add_to_ignore_list(self.supplier_code, self.current_siv_code)
 
         # Resetujeme stav
         self.status_var.set(f"Přeskočeno: {self.current_siv_code}")

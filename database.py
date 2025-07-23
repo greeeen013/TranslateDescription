@@ -1,30 +1,52 @@
 import pyodbc
 import os
 from tabulate import tabulate
+import json
 
+IGNORE_FILE = "ignoreSivCode.json"
+
+
+def get_ignored_siv_codes(supplier_code):
+    """Načte ignorované SivCodes pro daného dodavatele ze souboru"""
+    if not os.path.exists(IGNORE_FILE):
+        return []
+
+    try:
+        with open(IGNORE_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get(str(supplier_code), [])
+    except Exception as e:
+        print(f"[WARNING] Chyba při čtení {IGNORE_FILE}: {e}")
+        return []
 
 def get_suppliers():
     """Vrátí seznam dostupných dodavatelů"""
     return [("161784", "api (161784)")]  # Prozatím jen jeden dodavatel
 
+
 def get_products(supplier_code, limit=10):
-    """
-    Načte produkty pro překlad
-    Args:
-        supplier_code: kód dodavatele (např. '161784')
-        limit: počet produktů k načtení
-    Returns:
-        list: seznam tuple (SivCode, SivName)
-    """
+    """Načte produkty pro překlad s vynecháním ignorovaných SivCodes"""
     conn = connect_to_db()
     cursor = conn.cursor()
     try:
         table = os.getenv('DB_TABLE', '')
+
+        # Získat ignorované SivCodes pro tohoto dodavatele
+        ignored_codes = get_ignored_siv_codes(supplier_code)
+        ignored_condition = ""
+        if ignored_codes:
+            # Vytvořit SQL podmínku pro vynechání ignorovaných kódů
+            ignored_ids = ", ".join(f"'{code}'" for code in ignored_codes)
+            ignored_condition = f"AND SivCode NOT IN ({ignored_ids})"
+
         query = f"""
             SELECT TOP {limit} SivCode, SivName 
             FROM {table}
-            WHERE SivComId = ? AND (SivPLNote IS NULL OR SivPLNote = '')
+            WHERE SivComId = ? 
+            AND (SivPLNote IS NULL OR SivPLNote = '')
+            {ignored_condition}
         """
+        print(f"[DEBUG] SQL Query: {query}")
         cursor.execute(query, (supplier_code,))
         return cursor.fetchall()
     except Exception as e:
@@ -66,14 +88,14 @@ def connect_to_db():
     table = os.getenv('DB_TABLE', '')
 
     # Debug print connection details with more visibility
-    print("\n[DEBUG] Attempting database connection with:")
-    print("=" * 50)
-    print(f"  Server:    '{server}'")
-    print(f"  Database:  '{database}'")
-    print(f"  Username:  '{username}'")
-    print(f"  Table:     '{table if table else '<default table>'}'")
-    print(f"  Password:  {'*****' if password else '<not set>'}")
-    print("=" * 50)
+    # print("\n[DEBUG] Attempting database connection with:")
+    # print("=" * 50)
+    # print(f"  Server:    '{server}'")
+    # print(f"  Database:  '{database}'")
+    # print(f"  Username:  '{username}'")
+    # print(f"  Table:     '{table if table else '<default table>'}'")
+    # print(f"  Password:  {'*****' if password else '<not set>'}")
+    # print("=" * 50)
 
     if not all([server, database, username, password]):
         missing = []

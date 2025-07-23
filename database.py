@@ -21,10 +21,12 @@ def get_ignored_siv_codes(supplier_code):
 
 def get_suppliers():
     """Vrátí seznam dostupných dodavatelů"""
-    return [("161784", "api (161784)")]  # Prozatím jen jeden dodavatel
+    return [("161784", "api")#,
+            #("jeho kod", "další dodavatel")
+            ]
 
 
-def get_products(supplier_code, limit=10):
+def get_products(supplier_code, limit=20):
     """Načte produkty pro překlad s vynecháním ignorovaných SivCodes"""
     conn = connect_to_db()
     cursor = conn.cursor()
@@ -77,6 +79,7 @@ def update_product_note(siv_code, note_text):
         cursor.close()
         conn.close()
 
+
 def update_product_notes_batch(notes):
     """
     Hromadné ukládání překladů
@@ -87,15 +90,30 @@ def update_product_notes_batch(notes):
     cursor = conn.cursor()
     try:
         table = os.getenv('DB_TABLE', '')
-        query = f"UPDATE {table} SET SivPLNote = ? WHERE SivCode = ?"
+
+        # Zde je klíčová úprava - přidej CAST pro SivCode
+        query = f"""
+           UPDATE {table} 
+           SET SivPLNote = CAST(? AS NVARCHAR(MAX)) 
+           WHERE CAST(SivCode AS NVARCHAR(MAX)) = ?
+           """
 
         # Spustíme hromadný update
-        cursor.executemany(query, notes)
+        # Připrav data ve správném pořadí (note_text, siv_code)
+        data = [(note_text, siv_code) for siv_code, note_text in notes]
+        cursor.executemany(query, data)
         conn.commit()
         print(f"[SUCCESS] Uloženo {len(notes)} překladů najednou")
+
     except Exception as e:
         print(f"[ERROR] Chyba při hromadném ukládání: {str(e)}")
         conn.rollback()
+        # Fallback na jednotlivé updaty pokud hromadný selže
+        for siv_code, note_text in notes:
+            try:
+                update_product_note(siv_code, note_text)
+            except Exception as fallback_error:
+                print(f"[ERROR] Fallback uložení pro {siv_code} selhalo: {str(fallback_error)}")
     finally:
         cursor.close()
         conn.close()

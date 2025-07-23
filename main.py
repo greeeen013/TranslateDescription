@@ -276,7 +276,7 @@ class TranslationApp:
 
         except Exception as e:
             error_msg = f"{str(e)} - přeskočeno"
-            print(f"[ERROR] {error_msg}")
+            #print(f"[ERROR] {error_msg}")
             self.result_queue.put(("info", error_msg))
 
             # Pokud je zapnuto auto potvrzování, automaticky přeskočíme
@@ -484,7 +484,7 @@ class TranslationApp:
         if not self.translation_buffer:
             return
 
-        print(f"[DEBUG] Ukládám {len(self.translation_buffer)} překladů do DB")
+        print(f"[DEBUG] Ukládám {len(self.translation_buffer)} překladů do DB najednou")
 
         # Uložení v novém vlákně
         threading.Thread(
@@ -498,11 +498,12 @@ class TranslationApp:
         self.save_btn["state"] = "disabled"  # Deaktivujeme tlačítko
 
     def save_buffer_thread(self, buffer):
-        """Uložení bufferu do DB"""
+        """Uložení bufferu do DB pomocí hromadného update"""
         try:
-            for siv_code, translation in buffer:
-                update_product_note(siv_code, translation)
-            self.result_queue.put(("info", f"Uloženo {len(buffer)} překladů"))
+            # Použijeme hromadné ukládání
+            from database import update_product_notes_batch
+            update_product_notes_batch(buffer)
+            self.result_queue.put(("info", f"Uloženo {len(buffer)} překladů najednou"))
         except Exception as e:
             print(f"[ERROR] Chyba při ukládání bufferu: {str(e)}")
             self.result_queue.put(("error", str(e)))
@@ -511,11 +512,11 @@ class TranslationApp:
         """Obsluha zavírání okna - uloží buffer před ukončením"""
         if self.translation_buffer:
             print("[INFO] Ukládám zbývající překlady před zavřením")
-            # Vynucené uložení synchronně
-            for siv_code, translation in self.translation_buffer:
-                update_product_note(siv_code, translation)
+            # Použijeme hromadné uložení
+            from database import update_product_notes_batch
+            update_product_notes_batch(self.translation_buffer)
             # Krátké zpoždění pro dokončení uložení
-            time.sleep(1)
+            time.sleep(0.5)
         self.root.destroy()
 
     def save_translation_thread(self, siv_code, translation):

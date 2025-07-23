@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, scrolledtext
 from database import get_suppliers, get_products, update_product_note
 from apiScrapeDescriptions import scrape_description, scrape_specifications
 from LLMTranslate import get_ai_response
@@ -254,6 +254,7 @@ class TranslationApp:
         """Vlákno pro scrapování originálního popisu"""
         try:
             print(f"[DEBUG] Začínám scrapovat originál produktu {siv_code}")
+            self.set_loading(True, f"Načítám popis produktu od dodavatele")
             start_time = time.time()
 
             # Scrapování popisu a specifikací
@@ -270,6 +271,8 @@ class TranslationApp:
 
             # Okamžitě zobrazíme originál
             self.result_queue.put(("original_loaded", original_html, siv_code))
+
+            self.set_loading(False, f"Načítám produkty pro dodavatele")
 
             # Pak spustíme překlad
             self.start_translation(original_html, siv_code)
@@ -319,6 +322,7 @@ class TranslationApp:
         """Vlákno pro překlad"""
         try:
             print(f"[DEBUG] Začínám překlad produktu {siv_code}")
+            self.set_loading(True, f"Překládám produkt {siv_code}...")
             start_time = time.time()
 
             # Příprava promptu pro překlad
@@ -332,7 +336,7 @@ class TranslationApp:
             translated = get_ai_response(prompt)
 
             print(f"[DEBUG] Překlad dokončen za {time.time() - start_time:.2f}s")
-
+            self.set_loading(False)
             self.result_queue.put(("translation_loaded", translated, siv_code))
 
 

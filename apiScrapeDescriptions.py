@@ -71,8 +71,6 @@ def scrape_description(pnumber):
     bullets = [f"<br>{span.get_text(strip=True)}" for span in bullet_spans]
 
     # Poskládej finální HTML
-    if not description_text:
-        return ""
     full_html = f"<span>{description_text}\n\n{''.join(bullets)}</span><br><br>"
     return full_html
 

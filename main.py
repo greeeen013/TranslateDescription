@@ -1,11 +1,12 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from database import get_suppliers, get_products, update_product_note
-from apiScrapeDescriptions import scrape_description, scrape_specifications
+from webScrapeDescriptions import api_scrape_description, api_scrape_specifications, get_kosatec_product_data
 from LLMTranslate import get_ai_response
 import threading
 import queue
 import time
+
 
 
 class TranslationApp:
@@ -209,8 +210,8 @@ class TranslationApp:
             start_time = time.time()
 
             # Scrapování popisu a specifikací
-            description = scrape_description(siv_code)
-            specifications = scrape_specifications(siv_code)
+            description = api_scrape_description(siv_code)
+            specifications = api_scrape_specifications(siv_code)
             original_html = f"<h3>{siv_name}</h3>{description}{specifications}"
 
             print(f"[DEBUG] Scrapování originálu dokončeno za {time.time() - start_time:.2f}s")

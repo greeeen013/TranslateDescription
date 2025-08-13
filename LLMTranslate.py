@@ -1,4 +1,5 @@
 from together import Together
+import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import re
@@ -53,7 +54,44 @@ def get_ai_response(
         return ai_response
     except Exception as e:
         return f"Chyba při komunikaci s AI: {str(e)}"
+def gemini_ai_response(
+        user_message: str,
+        model: str = "gemini-1.5-flash",
+        delete_think: bool = True
+) -> str:
+    """
+    Získá odpověď od Gemini na základě uživatelské zprávy.
 
+    Args:
+        user_message (str): Zpráva od uživatele
+        model (str): Model Gemini, který se má použít (default: gemini-1.5-flash)
+        delete_think (bool): Odstranit části odpovědi označené <think> (default: True)
+
+    Returns:
+        str: Odpověď od AI
+    """
+    try:
+        # Načtení API klíče z .env
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY nebyl nalezen v .env souboru")
+
+        # Inicializace Gemini klienta
+        genai.configure(api_key=api_key)
+
+        model_instance = genai.GenerativeModel(model)
+        response = model_instance.generate_content(user_message)
+
+        ai_response = response.text
+
+        # Odstranění částí <think> pokud je delete_think True
+        if delete_think:
+            ai_response = re.sub(r'<think>.*?</think>', '', ai_response, flags=re.DOTALL)
+            ai_response = ai_response.strip()
+
+        return ai_response
+    except Exception as e:
+        return f"Chyba při komunikaci s Gemini: {str(e)}"
 
 # Příklad použití
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-from database import get_suppliers, get_products, update_product_note
+from database import get_suppliers, get_products, update_product_note, add_ignored_siv_code
 from webScrapeDescriptions import get_kosatec_product_data, api_scrape_product_details
 from LLMTranslate import get_ai_response, gemini_ai_response
 import threading
@@ -348,15 +348,22 @@ class TranslationApp:
                         self.confirm_btn["state"] = "normal"
                         self.load_product_details()
 
+
                 elif result[0] == "skip":
-                    # Tiché přeskočení problémového produktu vždy (bez dialogu)
                     warn_msg = result[1]
                     print(f"[DEBUG] {warn_msg} -> přeskakuji")
+                    # ✅ zapiš ignorovaný kód pro aktuálního dodavatele
+                    try:
+                        if self.supplier_code and self.current_siv_code:
+                            add_ignored_siv_code(self.supplier_code, self.current_siv_code)
+                    except Exception as e:
+                        print(f"[WARN] Zápis ignoreSivCode selhal: {e}")
                     self.set_loading(False)
                     self.translation_progress.stop()
                     self.translation_in_progress = False
                     self.current_index += 1
                     self.load_product_details()
+
 
                 elif result[0] == "original_loaded":
                     original, siv_code = result[1], result[2]
@@ -418,6 +425,12 @@ class TranslationApp:
         """Přeskočí aktuální produkt"""
         code = getattr(self, "current_siv_code", None)
         print(f"[DEBUG] Přeskakuji produkt {code if code else '<neznámý>'}")
+        # ✅ zapiš ignorovaný kód pro aktuálního dodavatele
+        try:
+            if self.supplier_code and code:
+                add_ignored_siv_code(self.supplier_code, code)
+        except Exception as e:
+            print(f"[WARN] Zápis ignoreSivCode selhal: {e}")
         self.clear_texts()
         self.translation_progress.stop()
         self.translation_in_progress = False
@@ -432,6 +445,14 @@ class TranslationApp:
         if not translated:
             if self.auto_confirm:
                 print("[DEBUG] Prázdný překlad – automaticky přeskočeno")
+
+                # ✅ zapiš ignorovaný kód pro aktuálního dodavatele
+                try:
+                    if self.supplier_code and self.current_siv_code:
+                        add_ignored_siv_code(self.supplier_code, self.current_siv_code)
+                except Exception as e:
+                    print(f"[WARN] Zápis ignoreSivCode selhal: {e}")
+
                 self.clear_texts()
                 self.translation_progress.stop()
                 self.translation_in_progress = False

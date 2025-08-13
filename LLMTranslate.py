@@ -56,7 +56,7 @@ def get_ai_response(
         return f"Chyba při komunikaci s AI: {str(e)}"
 def gemini_ai_response(
         user_message: str,
-        model: str = "gemini-1.5-flash",
+        model: str = "gemini-2.0-flash-lite",
         delete_think: bool = True
 ) -> str:
     """

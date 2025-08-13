@@ -235,19 +235,56 @@ class TranslationApp:
     def scrape_original_thread(self, siv_code, siv_name):
         try:
             print(f"[DEBUG] Začínám scrapovat originál produktu {siv_code}")
-            original_html = self.scrape_function(siv_code)
+            original_result = self.scrape_function(siv_code)
+
+            # Podpora obou návratových typů:
+            # - nový: (html, product_number, product_title)
+            # - původní: "html"
+            original_html, prod_num, prod_title = "", "", ""
+            if isinstance(original_result, tuple):
+                if len(original_result) >= 1:
+                    original_html = original_result[0] or ""
+                if len(original_result) >= 2:
+                    prod_num = original_result[1] or ""
+                if len(original_result) >= 3:
+                    prod_title = original_result[2] or ""
+            else:
+                original_html = original_result or ""
+
             full_html = f"{original_html}"
+
+            # Nastavení status baru podle požadovaného formátu:
+            # "PNumber - název z DB / product number - název produktu"
+            status_left = f"{siv_code} - {siv_name}"
+            right_parts = []
+            if prod_num:
+                right_parts.append(prod_num)
+            if prod_title:
+                right_parts.append(prod_title)
+            status_line = status_left if not right_parts else f"{status_left} ||| {' - '.join(right_parts)}"
+            self.status_var.set(status_line)
+
+            # Fronta pro UI a zahájení překladu
             self.result_queue.put(("original_loaded", full_html, siv_code))
             self.start_translation(full_html, siv_code)
+
         except Exception as e:
-            # (viz část B) – neprintovat tady, jen poslat do fronty
-            self.result_queue.put(("error", f"Chyba u produktu {siv_code}: {e}"))
+            # Zachováme původní tiché přeskočení s logem
+            msg = f"Scraper selhal u produktu {siv_code}: {e}"
+            print(f"[WARN] {msg}")
+            self.result_queue.put(("skip", msg))
         finally:
             self.scrape_in_progress = False
 
     def start_translation(self, original_html, siv_code):
         """Spustí proces překladu"""
         if self.translation_in_progress:
+            return
+
+        # 🚀 Nová kontrola – prázdný originál → rovnou přeskočit
+        if not original_html or not original_html.strip():
+            print(f"[DEBUG] Originál pro {siv_code} je prázdný – přeskočeno")
+            self.skip_product()
             return
 
         self.translation_in_progress = True
@@ -274,6 +311,7 @@ class TranslationApp:
                     "\n4. Nikdy nepřidávej cizojazyčné znaky (jako 几乎) ani znaky mimo českou znakovou sadu, drž se českého jazyka"\
                     "\n5. V technických termínech použij standardní českou terminologii (např. 'lineární imager', 'IP42')"\
                     "\n6. Pokud v textu je 3.5 cm, přelož to jako 3,5 cm (s čárkou), pokud je 3.5 mil, přelož to jako 3,5 mil (s čárkou)"\
+                    "\n7. Nepřidávej nic co není v původním textu například: ```html to nepřidavej"\
                     "\n\nText k překladu:\n\n" + original_html
             )
 
@@ -309,6 +347,16 @@ class TranslationApp:
                         self.skip_btn["state"] = "normal"
                         self.confirm_btn["state"] = "normal"
                         self.load_product_details()
+
+                elif result[0] == "skip":
+                    # Tiché přeskočení problémového produktu vždy (bez dialogu)
+                    warn_msg = result[1]
+                    print(f"[DEBUG] {warn_msg} -> přeskakuji")
+                    self.set_loading(False)
+                    self.translation_progress.stop()
+                    self.translation_in_progress = False
+                    self.current_index += 1
+                    self.load_product_details()
 
                 elif result[0] == "original_loaded":
                     original, siv_code = result[1], result[2]

@@ -5,6 +5,28 @@ import json
 
 IGNORE_FILE = "ignoreSivCode.json"
 
+def add_ignored_siv_code(supplier_code, siv_code):
+    """
+    Přidá daný SivCode (PNumber) do ignoreSivCode.json pod klíč dodavatele.
+    Vytvoří soubor pokud neexistuje, hodnoty udržuje jako unikátní seznam stringů.
+    """
+    try:
+        data = {}
+        if os.path.exists(IGNORE_FILE):
+            with open(IGNORE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f) or {}
+
+        key = str(supplier_code)
+        values = set(map(str, data.get(key, [])))
+        values.add(str(siv_code))
+        data[key] = sorted(values)
+
+        with open(IGNORE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+        print(f"[INFO] Přidán ignorovaný kód {siv_code} pro dodavatele {supplier_code}")
+    except Exception as e:
+        print(f"[WARNING] Nepodařilo se zapsat do {IGNORE_FILE}: {e}")
 
 def get_ignored_siv_codes(supplier_code):
     """Načte ignorované SivCodes pro daného dodavatele ze souboru"""
@@ -24,7 +46,6 @@ def get_suppliers():
     return [("161784", "api")#,
             #("jeho kod", "další dodavatel")
             ]
-
 
 def get_products(supplier_code, limit=20):
     """Načte produkty pro překlad s vynecháním ignorovaných SivCodes"""
@@ -82,7 +103,6 @@ def update_product_note(siv_code, note_text):
     finally:
         cursor.close()
         conn.close()
-
 
 def update_product_notes_batch(notes):
     """

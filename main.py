@@ -21,26 +21,32 @@ class TranslationApp:
         self.current_products = []
         self.current_index = 0
         self.supplier_code = None
-        self.scrape_function = None  # Uchovává scrapovací funkci
+        self.scrape_function = None
         self.loading = False
         self.translation_in_progress = False
         self.auto_confirm = False
 
-        # Fronta pro komunikaci mezi vlákny
         self.result_queue = queue.Queue()
 
         self.scrape_in_progress = False
         self.current_siv_code = None
 
+        self.style = ttk.Style()
+        try:
+            self.style.configure("Big.TButton", font=("Arial", 14), padding=(20, 12))
+        except Exception:
+            self.style.configure("Big.TButton", padding=(20, 12))
+
+        # Zvýraznění a zvětšení status baru
+        self.style.configure("BigStatus.TLabel", font=("Arial", 12), padding=(5, 8))
+
         self.create_widgets()
         self.check_queue()
 
     def create_widgets(self):
-        # Frame pro dodavatele a automatické potvrzení
         control_frame = ttk.Frame(self.root)
-        control_frame.pack(fill="x", padx=10, pady=5)
+        control_frame.pack(fill="x", padx=10, pady=(10, 5))
 
-        # Frame pro dodavatele
         supplier_frame = ttk.LabelFrame(control_frame, text="Dodavatel")
         supplier_frame.pack(side="left", fill="x", expand=True, padx=5, pady=5)
 
@@ -55,7 +61,6 @@ class TranslationApp:
         self.supplier_cb.pack(side="left", padx=5, pady=5, fill="x", expand=True)
         self.supplier_cb.bind("<<ComboboxSelected>>", self.supplier_selected)
 
-        # Checkbox pro automatické potvrzení
         self.auto_confirm_var = tk.BooleanVar(value=self.auto_confirm)
         auto_confirm_check = ttk.Checkbutton(
             control_frame,
@@ -65,15 +70,23 @@ class TranslationApp:
         )
         auto_confirm_check.pack(side="right", padx=10, pady=5)
 
-        # Naplnění dodavateli - použijeme naše definované dodavatele
         self.supplier_cb["values"] = list(DODAVATELE.keys())
         self.supplier_cb.set('')
 
-        # Frame pro obsah
+        # Status bar – zvětšený (2,5×)
+        self.status_var = tk.StringVar(value="Připraveno")
+        status_top = ttk.Label(
+            self.root,
+            textvariable=self.status_var,
+            relief="sunken",
+            anchor="w",
+            style="BigStatus.TLabel"
+        )
+        status_top.pack(fill="x", padx=10, pady=(0, 8))
+
         content_frame = ttk.Frame(self.root)
         content_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Původní popis (vlevo)
         left_frame = ttk.LabelFrame(content_frame, text="Originální popis")
         left_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
@@ -85,7 +98,6 @@ class TranslationApp:
         )
         self.original_text.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Překlad (vpravo)
         right_frame = ttk.LabelFrame(content_frame, text="Překlad")
         right_frame.pack(side="right", fill="both", expand=True, padx=5, pady=5)
 
@@ -96,26 +108,21 @@ class TranslationApp:
         )
         self.translated_text.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Loading indicator
-        self.loading_label = ttk.Label(self.root, text="", font=('Arial', 12))
-        self.loading_label.pack(fill="x", padx=10, pady=5)
+        self.loading_frame = ttk.Frame(self.root, height=56)
+        self.loading_frame.pack(fill="x", padx=10, pady=(0, 5))
+        self.loading_frame.pack_propagate(False)
 
-        # Progress bar pro překlad
+        self.loading_label = ttk.Label(self.loading_frame, text="", font=('Arial', 12))
+        self.loading_label.pack(fill="x", pady=(6, 2))
+
         self.translation_progress = ttk.Progressbar(
-            self.root,
+            self.loading_frame,
             orient='horizontal',
             mode='indeterminate',
             length=280
         )
-        self.translation_progress.pack(fill="x", padx=10, pady=5)
-        self.translation_progress.pack_forget()
+        self.translation_progress.pack(fill="x")
 
-        # Status bar
-        self.status_var = tk.StringVar(value="Připraveno")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief="sunken", anchor="w")
-        status_bar.pack(fill="x", side="bottom", padx=10, pady=5)
-
-        # Tlačítka
         button_frame = ttk.Frame(self.root)
         button_frame.pack(fill="x", padx=10, pady=5)
 
@@ -123,7 +130,8 @@ class TranslationApp:
             button_frame,
             text="Přeskočit",
             command=self.skip_product,
-            state="disabled"
+            state="disabled",
+            style="Big.TButton"
         )
         self.skip_btn.pack(side="left", padx=5)
 
@@ -131,7 +139,8 @@ class TranslationApp:
             button_frame,
             text="Potvrdit",
             command=self.confirm_translation,
-            state="disabled"
+            state="disabled",
+            style="Big.TButton"
         )
         self.confirm_btn.pack(side="right", padx=5)
 
@@ -214,7 +223,6 @@ class TranslationApp:
         self.clear_texts()
 
         self.set_loading(True, f"Načítám originál pro {siv_code}…")
-        self.translation_progress.pack()
         self.translation_progress.start()
 
         # Spustíme nejprve načtení originálu
@@ -243,7 +251,6 @@ class TranslationApp:
             return
 
         self.translation_in_progress = True
-        self.translation_progress.pack()
         self.translation_progress.start()
 
         threading.Thread(
@@ -260,18 +267,18 @@ class TranslationApp:
 
             # Příprava promptu pro překlad
             prompt = (
-                    "Přelož následující text z **němčiny** do češtiny. Zachovej přesnou strukturu HTML:"
-                    "\n1. VŠECHNY HTML tagy, atributy a entity (jako `&nbsp;`) ponech beze změny"
-                    "\n2. Překládej POUZE textový obsah mezi tagy"
-                    "\n3. Zachovej číselné hodnoty, kódy (IP42, USB), technické parametry (3.5 mil, 100 řádků/s) a firemní názvy (Honeywell) beze změny"
-                    "\n4. Nikdy nepřidávej cizojazyčné znaky (jako 几乎) ani znaky mimo českou znakovou sadu, drž se českého jazyka"
-                    "\n5. V technických termínech použij standardní českou terminologii (např. 'lineární imager', 'IP42')"
-                    "\n6. Pokud v textu je 3.5 cm, přelož to jako 3,5 cm (s čárkou), pokud je 3.5 mil, přelož to jako 3,5 mil (s čárkou)"
+                    "Přelož následující text z **němčiny** do češtiny. Zachovej přesnou strukturu HTML:"\
+                    "\n1. VŠECHNY HTML tagy, atributy a entity (jako `&nbsp;`) ponech beze změny"\
+                    "\n2. Překládej POUZE textový obsah mezi tagy"\
+                    "\n3. Zachovej číselné hodnoty, kódy (IP42, USB), technické parametry (3.5 mil, 100 řádků/s) a firemní názvy (Honeywell) beze změny"\
+                    "\n4. Nikdy nepřidávej cizojazyčné znaky (jako 几乎) ani znaky mimo českou znakovou sadu, drž se českého jazyka"\
+                    "\n5. V technických termínech použij standardní českou terminologii (např. 'lineární imager', 'IP42')"\
+                    "\n6. Pokud v textu je 3.5 cm, přelož to jako 3,5 cm (s čárkou), pokud je 3.5 mil, přelož to jako 3,5 mil (s čárkou)"\
                     "\n\nText k překladu:\n\n" + original_html
             )
 
             # Překlad pomocí AI
-            if prompt:
+            if prompt :
                 # translated = get_ai_response(prompt)
                 translated = gemini_ai_response(prompt)
 
@@ -334,9 +341,7 @@ class TranslationApp:
 
                 elif result[0] == "translation_finished":
                     self.translation_progress.stop()
-                    self.translation_progress.pack_forget()
                     self.set_loading(False)
-
 
                 elif result[0] == "error":
                     err_msg = result[1]
@@ -344,7 +349,6 @@ class TranslationApp:
                     self.status_var.set("Chyba")
                     self.set_loading(False)
                     self.translation_progress.stop()
-                    self.translation_progress.pack_forget()
                     if self.auto_confirm:
                         # Tiché přeskočení problémového produktu a pokračování
                         self.current_index += 1
@@ -368,7 +372,6 @@ class TranslationApp:
         print(f"[DEBUG] Přeskakuji produkt {code if code else '<neznámý>'}")
         self.clear_texts()
         self.translation_progress.stop()
-        self.translation_progress.pack_forget()
         self.translation_in_progress = False
         self.current_index += 1
         self.load_product_details()
@@ -383,7 +386,6 @@ class TranslationApp:
                 print("[DEBUG] Prázdný překlad – automaticky přeskočeno")
                 self.clear_texts()
                 self.translation_progress.stop()
-                self.translation_progress.pack_forget()
                 self.translation_in_progress = False
                 self.current_index += 1
                 self.load_product_details()
@@ -401,7 +403,6 @@ class TranslationApp:
         # Přesun na další produkt
         self.clear_texts()
         self.translation_progress.stop()
-        self.translation_progress.pack_forget()
         self.translation_in_progress = False
         self.current_index += 1
         self.load_product_details()
@@ -432,16 +433,24 @@ class TranslationApp:
         self.status_var.set("Připraveno")
         self.set_loading(False)
         self.translation_progress.stop()
-        self.translation_progress.pack_forget()
         self.translation_in_progress = False
 
     def set_loading(self, loading, message=None):
-        """Nastaví stav načítání"""
+        """Nastaví stav načítání (bez změny layoutu)"""
         self.loading = loading
         if loading:
-            self.loading_label.config(text=message)
+            self.loading_label.config(text=message or "Načítám…")
+            # Progressbar už je v layoutu, stačí ho rozjet
+            try:
+                self.translation_progress.start()
+            except Exception:
+                pass
         else:
             self.loading_label.config(text="")
+            try:
+                self.translation_progress.stop()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

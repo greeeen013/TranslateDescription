@@ -1,13 +1,16 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from database import get_suppliers, get_products, update_product_note
-from webScrapeDescriptions import api_scrape_description, api_scrape_specifications, get_kosatec_product_data
-from LLMTranslate import get_ai_response
+from webScrapeDescriptions import get_kosatec_product_data, api_scrape_product_details
+from LLMTranslate import get_ai_response, gemini_ai_response
 import threading
 import queue
 import time
 
-
+DODAVATELE = {
+    "api": {"kod": "161784", "funkce": api_scrape_product_details},
+    "Kosatec (selenium)": {"kod": "165463", "funkce": get_kosatec_product_data},
+}
 
 class TranslationApp:
     def __init__(self, root):
@@ -18,12 +21,16 @@ class TranslationApp:
         self.current_products = []
         self.current_index = 0
         self.supplier_code = None
+        self.scrape_function = None  # Uchovává scrapovací funkci
         self.loading = False
         self.translation_in_progress = False
-        self.auto_confirm = False  # Inicializace proměnné pro automatické potvrzování
+        self.auto_confirm = False
 
         # Fronta pro komunikaci mezi vlákny
         self.result_queue = queue.Queue()
+
+        self.scrape_in_progress = False
+        self.current_siv_code = None
 
         self.create_widgets()
         self.check_queue()
@@ -58,9 +65,8 @@ class TranslationApp:
         )
         auto_confirm_check.pack(side="right", padx=10, pady=5)
 
-        # Naplnění dodavateli
-        suppliers = get_suppliers()
-        self.supplier_cb["values"] = [f"{name} ({code})" for code, name in suppliers]
+        # Naplnění dodavateli - použijeme naše definované dodavatele
+        self.supplier_cb["values"] = list(DODAVATELE.keys())
         self.supplier_cb.set('')
 
         # Frame pro obsah
@@ -140,14 +146,21 @@ class TranslationApp:
 
     def supplier_selected(self, event):
         """Zpracování výběru dodavatele"""
-        selection = self.supplier_var.get()
-        if not selection:
+        supplier_name = self.supplier_var.get()
+        if not supplier_name:
             return
 
-        self.supplier_code = selection.split("(")[-1].rstrip(")")
-        print(f"[DEBUG] Vybrán dodavatel: {selection}, kód: {self.supplier_code}")
+        # Získání kódu a funkce ze slovníku DODAVATELE
+        if supplier_name in DODAVATELE:
+            dodavatel = DODAVATELE[supplier_name]
+            self.supplier_code = dodavatel["kod"]
+            self.scrape_function = dodavatel["funkce"]
+            print(f"[DEBUG] Vybrán dodavatel: {supplier_name}, kód: {self.supplier_code}")
+        else:
+            messagebox.showerror("Chyba", f"Neznámý dodavatel: {supplier_name}")
+            return
 
-        self.set_loading(True, f"Načítám produkty pro dodavatele: {selection}...")
+        self.set_loading(True, f"Načítám produkty pro dodavatele: {supplier_name}...")
 
         threading.Thread(
             target=self.load_products_thread,
@@ -182,6 +195,9 @@ class TranslationApp:
         if self.current_index >= len(self.current_products):
             print("[DEBUG] Načítám další produkty...")
             self.set_loading(True, "Načítám další produkty...")
+            if self.scrape_in_progress:
+                return
+            self.scrape_in_progress = True
             threading.Thread(
                 target=self.load_products_thread,
                 daemon=True
@@ -190,11 +206,16 @@ class TranslationApp:
 
         # Získání aktuálního produktu
         siv_code, siv_name = self.current_products[self.current_index]
+        self.current_siv_code = siv_code
         print(f"[DEBUG] Načítám produkt {self.current_index + 1}/{len(self.current_products)}: {siv_code} - {siv_name}")
-        self.status_var.set(f"Produkt {self.current_index + 1}/{len(self.current_products)}: {siv_name}")
+        self.status_var.set(f"Produkt {self.current_index + 1}/{len(self.current_products)}: {siv_code} - {siv_name}")
 
         # Vymazání textových polí
         self.clear_texts()
+
+        self.set_loading(True, f"Načítám originál pro {siv_code}…")
+        self.translation_progress.pack()
+        self.translation_progress.start()
 
         # Spustíme nejprve načtení originálu
         threading.Thread(
@@ -204,27 +225,17 @@ class TranslationApp:
         ).start()
 
     def scrape_original_thread(self, siv_code, siv_name):
-        """Vlákno pro scrapování originálního popisu"""
         try:
             print(f"[DEBUG] Začínám scrapovat originál produktu {siv_code}")
-            start_time = time.time()
-
-            # Scrapování popisu a specifikací
-            description = api_scrape_description(siv_code)
-            specifications = api_scrape_specifications(siv_code)
-            original_html = f"<h3>{siv_name}</h3>{description}{specifications}"
-
-            print(f"[DEBUG] Scrapování originálu dokončeno za {time.time() - start_time:.2f}s")
-
-            # Okamžitě zobrazíme originál
-            self.result_queue.put(("original_loaded", original_html, siv_code))
-
-            # Pak spustíme překlad
-            self.start_translation(original_html, siv_code)
-
+            original_html = self.scrape_function(siv_code)
+            full_html = f"{original_html}"
+            self.result_queue.put(("original_loaded", full_html, siv_code))
+            self.start_translation(full_html, siv_code)
         except Exception as e:
-            print(f"[ERROR] Chyba u produktu {siv_code}: {str(e)}")
-            self.result_queue.put(("error", f"Chyba u produktu {siv_code}: {str(e)}"))
+            # (viz část B) – neprintovat tady, jen poslat do fronty
+            self.result_queue.put(("error", f"Chyba u produktu {siv_code}: {e}"))
+        finally:
+            self.scrape_in_progress = False
 
     def start_translation(self, original_html, siv_code):
         """Spustí proces překladu"""
@@ -249,13 +260,20 @@ class TranslationApp:
 
             # Příprava promptu pro překlad
             prompt = (
-                    "Převeď následující text z polštiny do češtiny. Text obsahuje HTML tagy ty ponech beze změny. "
-                    "Překládej pouze textový obsah, HTML tagy a atributy zachovej beze změny. Nic do textu nepřidávej ani neodebírej pouze překládej."
-                    "Zde je text:\n\n" + original_html
+                    "Přelož následující text z **němčiny** do češtiny. Zachovej přesnou strukturu HTML:"
+                    "\n1. VŠECHNY HTML tagy, atributy a entity (jako `&nbsp;`) ponech beze změny"
+                    "\n2. Překládej POUZE textový obsah mezi tagy"
+                    "\n3. Zachovej číselné hodnoty, kódy (IP42, USB), technické parametry (3.5 mil, 100 řádků/s) a firemní názvy (Honeywell) beze změny"
+                    "\n4. Nikdy nepřidávej cizojazyčné znaky (jako 几乎) ani znaky mimo českou znakovou sadu, drž se českého jazyka"
+                    "\n5. V technických termínech použij standardní českou terminologii (např. 'lineární imager', 'IP42')"
+                    "\n6. Pokud v textu je 3.5 cm, přelož to jako 3,5 cm (s čárkou), pokud je 3.5 mil, přelož to jako 3,5 mil (s čárkou)"
+                    "\n\nText k překladu:\n\n" + original_html
             )
 
             # Překlad pomocí AI
-            translated = get_ai_response(prompt)
+            if prompt:
+                # translated = get_ai_response(prompt)
+                translated = gemini_ai_response(prompt)
 
             print(f"[DEBUG] Překlad dokončen za {time.time() - start_time:.2f}s")
 
@@ -298,6 +316,7 @@ class TranslationApp:
 
                     # Uložení aktuálního kódu produktu
                     self.current_siv_code = siv_code
+                    self.set_loading(True, "Překládám…")
 
                 elif result[0] == "translation_loaded":
                     translated, siv_code = result[1], result[2]
@@ -316,19 +335,23 @@ class TranslationApp:
                 elif result[0] == "translation_finished":
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
+                    self.set_loading(False)
+
 
                 elif result[0] == "error":
-                    print(f"[ERROR] {result[1]}")
-                    messagebox.showerror("Chyba", result[1])
+                    err_msg = result[1]
+                    print(f"[ERROR] {err_msg}")
                     self.status_var.set("Chyba")
                     self.set_loading(False)
                     self.translation_progress.stop()
                     self.translation_progress.pack_forget()
-
-                    # Pokud je chyba, vypneme auto potvrzení
                     if self.auto_confirm:
-                        self.auto_confirm_var.set(False)
-                        self.toggle_auto_confirm()
+                        # Tiché přeskočení problémového produktu a pokračování
+                        self.current_index += 1
+                        self.load_product_details()
+                    else:
+                        # V manuálním režimu ukaž dialog
+                        messagebox.showerror("Chyba", err_msg)
 
                 elif result[0] == "info":
                     print(f"[INFO] {result[1]}")
@@ -341,7 +364,8 @@ class TranslationApp:
 
     def skip_product(self):
         """Přeskočí aktuální produkt"""
-        print(f"[DEBUG] Přeskakuji produkt {self.current_siv_code}")
+        code = getattr(self, "current_siv_code", None)
+        print(f"[DEBUG] Přeskakuji produkt {code if code else '<neznámý>'}")
         self.clear_texts()
         self.translation_progress.stop()
         self.translation_progress.pack_forget()
@@ -355,7 +379,16 @@ class TranslationApp:
         print(f"[DEBUG] Potvrzuji překlad pro produkt {self.current_siv_code}")
 
         if not translated:
-            messagebox.showwarning("Varování", "Překlad je prázdný")
+            if self.auto_confirm:
+                print("[DEBUG] Prázdný překlad – automaticky přeskočeno")
+                self.clear_texts()
+                self.translation_progress.stop()
+                self.translation_progress.pack_forget()
+                self.translation_in_progress = False
+                self.current_index += 1
+                self.load_product_details()
+            else:
+                messagebox.showwarning("Varování", "Překlad je prázdný")
             return
 
         # Uložení v novém vlákně

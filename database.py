@@ -40,12 +40,16 @@ def get_products(supplier_code, limit=20):
         for code in ignored_codes:
             cursor.execute("INSERT INTO #IgnoredCodes (SivCode) VALUES (?)", (code,))
 
+        # Opravený dotaz s explicitní kolací
         query = f"""
             SELECT TOP {limit} SivCode, SivName 
             FROM {table}
             WHERE SivComId = ? 
             AND (SivPLNote IS NULL OR SivPLNote = '')
-            AND SivCode NOT IN (SELECT SivCode FROM #IgnoredCodes)
+            AND SivCode COLLATE Czech_CI_AS NOT IN (
+                SELECT SivCode COLLATE Czech_CI_AS 
+                FROM #IgnoredCodes
+            ) ORDER BY NEWID()
         """
         print(f"[DEBUG] SQL Query: {query}")
         cursor.execute(query, (supplier_code,))

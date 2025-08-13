@@ -5,16 +5,44 @@ from urllib.parse import urljoin
 
 
 def api_scrape_product_details(PNumber):
+    """
+    Vrátí (final_output_html, product_number, product_title).
+
+    - final_output_html: stávající HTML (popis + specifikace), beze změny struktury
+    - product_number: hodnota z řádku 'Artikelnr.'
+    - product_title: text z <h5 class="fw-bold text-primary my-4">…</h5>
+    """
+    import requests
+    from bs4 import BeautifulSoup
+    import re
+
     url = f"https://shop.api.de/product/details/{PNumber}"
     try:
         response = requests.get(url)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        return f"Chyba při načítání stránky: {e}"
+        # zachováme staré chování (string) + prázdné identifikátory
+        return f"Chyba při načítání stránky: {e}", "", ""
 
     soup = BeautifulSoup(response.content, 'html.parser')
 
-    # První část: popis produktu
+    # ---------- Nově: extrakce názvu produktu ----------
+    title_tag = soup.find('h5', class_='fw-bold text-primary my-4')
+    product_title = title_tag.get_text(strip=True) if title_tag else ""
+
+    # ---------- Nově: extrakce Artikelnr. ----------
+    product_number = ""
+    try:
+        label_div = soup.find('div', string=lambda t: t and "Artikelnr." in t)
+        if label_div:
+            num_div = label_div.find_next_sibling('div')
+            if num_div:
+                b = num_div.find('b')
+                product_number = (b.get_text(strip=True) if b else num_div.get_text(strip=True)).strip()
+    except Exception:
+        product_number = ""
+
+    # ---------- Původní logika stavby výstupního HTML ----------
     description_section = soup.find('span', class_='displayTabOnPrint')
     description = ""
     if description_section:
@@ -22,7 +50,6 @@ def api_scrape_product_details(PNumber):
         if description_p:
             description = f"<span>{description_p.get_text(strip=True)}</span>"
 
-    # Druhá část: specifikace (hlavní tabulka)
     specs_html = ""
     specs_section = soup.find('div', class_='mb-5 px-2 pb-5')
     if specs_section:
@@ -39,7 +66,6 @@ def api_scrape_product_details(PNumber):
 
         specs_html += "</ul>"
 
-    # Další tabulky s class 'mb-4 px-2'
     more_sections = soup.find_all('div', class_='mb-4 px-2')
     for section in more_sections:
         section_title = section.find('h6', class_='fw-bold')
@@ -56,7 +82,8 @@ def api_scrape_product_details(PNumber):
         specs_html += "</ul>"
 
     final_output = f"{description}<br><br>\n{specs_html}" if description else specs_html
-    return final_output
+    return final_output, product_number, product_title
+
 
 
 from selenium import webdriver
@@ -282,7 +309,7 @@ def get_kosatec_product_data(pnumber: str) -> str:
         # ========================================
         output = "\n".join(output_parts).strip()
         if not output:
-            return None
+            return ""
         return output
 
     finally:

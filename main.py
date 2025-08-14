@@ -1,3 +1,4 @@
+
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 from database import get_suppliers, get_products, update_product_note, add_ignored_siv_code
@@ -73,16 +74,35 @@ class TranslationApp:
         self.supplier_cb["values"] = list(DODAVATELE.keys())
         self.supplier_cb.set('')
 
-        # Status bar – zvětšený (2,5×)
-        self.status_var = tk.StringVar(value="Připraveno")
-        status_top = ttk.Label(
-            self.root,
-            textvariable=self.status_var,
+        # ===== NOVĚ: DVA STATUS BARY VEDLE SEBE (1:1) =====
+        self.status1_var = tk.StringVar(value="")
+        self.status2_var = tk.StringVar(value="")
+
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(fill="x", padx=10, pady=(0, 8))
+        status_frame.columnconfigure(0, weight=1)
+        status_frame.columnconfigure(1, weight=1)
+
+        self.status1_label = ttk.Label(
+            status_frame,
+            textvariable=self.status1_var,
             relief="sunken",
             anchor="w",
             style="BigStatus.TLabel"
         )
-        status_top.pack(fill="x", padx=10, pady=(0, 8))
+        self.status1_label.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+
+        self.status2_label = ttk.Label(
+            status_frame,
+            textvariable=self.status2_var,
+            relief="sunken",
+            anchor="w",
+            style="BigStatus.TLabel"
+        )
+        self.status2_label.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+
+        # (Ponecháme i skrytou proměnnou status_var pro starší logiku, ale už ji nezobrazujeme.)
+        self.status_var = tk.StringVar(value="")
 
         content_frame = ttk.Frame(self.root)
         content_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -183,6 +203,8 @@ class TranslationApp:
             start_time = time.time()
 
             products = get_products(self.supplier_code)
+            print("Vráceno z SQL dotazu:")
+            print(products)
 
             print(f"[DEBUG] Načteno {len(products)} produktů za {time.time() - start_time:.2f}s")
 
@@ -213,26 +235,45 @@ class TranslationApp:
             ).start()
             return
 
-        # Získání aktuálního produktu
-        siv_code, siv_name = self.current_products[self.current_index]
-        self.current_siv_code = siv_code
-        print(f"[DEBUG] Načítám produkt {self.current_index + 1}/{len(self.current_products)}: {siv_code} - {siv_name}")
-        self.status_var.set(f"Produkt {self.current_index + 1}/{len(self.current_products)}: {siv_code} - {siv_name}")
+        # ====== NOVĚ: Podpora pětice hodnot z SQL ======
+        row = self.current_products[self.current_index]
+        try:
+            pnumber = row[0]
+            extras = [str(x) if x is not None else "" for x in row[1:]]
+        except Exception:
+            # pro jistotu fallback pro starý formát (2 položky)
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                pnumber = row[0]
+                extras = [str(row[1]), ""]
+            else:
+                raise
+
+        self.current_siv_code = pnumber
+
+        # Nastavíme 2 status bary:
+        # 1) první dvě informace po PNumber (indexy 0 a 1 v "extras")
+        # 2) zbylé dvě informace (indexy 2 a 3 v "extras")
+        left_text = "\n".join([val for val in extras[:2] if val])
+        right_text = "\n".join([val for val in extras[2:4] if val])
+        self.status1_var.set(left_text)
+        self.status2_var.set(right_text)
+
+        print(f"[DEBUG] Načítám produkt: {pnumber} ({left_text}) ({right_text})")
 
         # Vymazání textových polí
         self.clear_texts()
 
-        self.set_loading(True, f"Načítám originál pro {siv_code}…")
+        self.set_loading(True, f"Načítám originál pro {pnumber}…")
         self.translation_progress.start()
 
         # Spustíme nejprve načtení originálu
         threading.Thread(
             target=self.scrape_original_thread,
-            args=(siv_code, siv_name),
+            args=(pnumber, None),
             daemon=True
         ).start()
 
-    def scrape_original_thread(self, siv_code, siv_name):
+    def scrape_original_thread(self, siv_code, siv_name_unused):
         try:
             print(f"[DEBUG] Začínám scrapovat originál produktu {siv_code}")
             original_result = self.scrape_function(siv_code)
@@ -253,18 +294,7 @@ class TranslationApp:
 
             full_html = f"{original_html}"
 
-            # Nastavení status baru podle požadovaného formátu:
-            # "PNumber - název z DB / product number - název produktu"
-            status_left = f"{siv_code} - {siv_name}"
-            right_parts = []
-            if prod_num:
-                right_parts.append(prod_num)
-            if prod_title:
-                right_parts.append(prod_title)
-            status_line = status_left if not right_parts else f"{status_left} ||| {' - '.join(right_parts)}"
-            self.status_var.set(status_line)
-
-            # Fronta pro UI a zahájení překladu
+            # (Status bary už nenastavujeme, necháváme pouze dvojici z SQL)
             self.result_queue.put(("original_loaded", full_html, siv_code))
             self.start_translation(full_html, siv_code)
 
@@ -348,7 +378,6 @@ class TranslationApp:
                         self.confirm_btn["state"] = "normal"
                         self.load_product_details()
 
-
                 elif result[0] == "skip":
                     warn_msg = result[1]
                     print(f"[DEBUG] {warn_msg} -> přeskakuji")
@@ -363,7 +392,6 @@ class TranslationApp:
                     self.translation_in_progress = False
                     self.current_index += 1
                     self.load_product_details()
-
 
                 elif result[0] == "original_loaded":
                     original, siv_code = result[1], result[2]
@@ -401,8 +429,9 @@ class TranslationApp:
                 elif result[0] == "error":
                     err_msg = result[1]
                     print(f"[ERROR] {err_msg}")
-                    self.status_var.set("Chyba")
-                    self.set_loading(False)
+                    # Chybovou hlášku zobrazíme v loading řádku
+                    self.set_loading(False, None)
+                    self.loading_label.config(text=f"Chyba: {err_msg}")
                     self.translation_progress.stop()
                     if self.auto_confirm:
                         # Tiché přeskočení problémového produktu a pokračování
@@ -414,7 +443,8 @@ class TranslationApp:
 
                 elif result[0] == "info":
                     print(f"[INFO] {result[1]}")
-                    self.status_var.set(result[1])
+                    # Necháváme jen v loading hlášce
+                    self.loading_label.config(text=result[1])
 
         except queue.Empty:
             pass
@@ -499,7 +529,8 @@ class TranslationApp:
         self.clear_texts()
         self.skip_btn["state"] = "disabled"
         self.confirm_btn["state"] = "disabled"
-        self.status_var.set("Připraveno")
+        self.status1_var.set("")
+        self.status2_var.set("")
         self.set_loading(False)
         self.translation_progress.stop()
         self.translation_in_progress = False
@@ -508,7 +539,8 @@ class TranslationApp:
         """Nastaví stav načítání (bez změny layoutu)"""
         self.loading = loading
         if loading:
-            self.loading_label.config(text=message or "Načítám…")
+            if message is not None:
+                self.loading_label.config(text=message or "Načítám…")
             # Progressbar už je v layoutu, stačí ho rozjet
             try:
                 self.translation_progress.start()
@@ -526,3 +558,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = TranslationApp(root)
     root.mainloop()
+

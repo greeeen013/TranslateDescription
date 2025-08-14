@@ -63,9 +63,11 @@ def get_products(supplier_code, limit=20):
 
         # Opravený dotaz s explicitní kolací
         query = f"""
-            SELECT TOP {limit} SivCode, SivName 
+            SELECT TOP {limit} SivCode, SivName, SivCode2, StiName, StiPartNo
             FROM {table}
+            JOIN StoItem ON SivStiId = StiId
             WHERE SivComId = ? 
+            AND ISNULL(StiPLNote,'')=''
             AND (SivPLNote IS NULL OR SivPLNote = '')
             AND SivCode COLLATE Czech_CI_AS NOT IN (
                 SELECT SivCode COLLATE Czech_CI_AS 
